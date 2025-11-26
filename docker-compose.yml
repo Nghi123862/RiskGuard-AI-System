@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------
+  # 1. ZOOKEEPER (Bắt buộc cho Kafka)
+  # ----------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    hostname: zookeeper
+    container_name: risk_zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - risk-network
+
+  # ----------------------------------------
+  # 2. KAFKA (Message Queue)
+  # ----------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    hostname: kafka
+    container_name: risk_kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    networks:
+      - risk-network
+
+  # ----------------------------------------
+  # 3. KAFDROP (Giao diện quản lý Kafka - Web UI)
+  # ----------------------------------------
+  kafdrop:
+    image: obsidiandynamics/kafdrop
+    container_name: risk_kafdrop
+    depends_on:
+      - kafka
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:29092"
+    networks:
+      - risk-network
+
+  # ----------------------------------------
+  # 4. MONGODB (Database)
+  # ----------------------------------------
+  mongo:
+    image: mongo:6.0
+    container_name: risk_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data/mongo:/data/db # Lưu dữ liệu ra ngoài để không mất khi tắt Docker
+    networks:
+      - risk-network
+
+  # ----------------------------------------
+  # 5. MONGO EXPRESS (Giao diện quản lý Mongo - Web UI)
+  # ----------------------------------------
+  mongo-express:
+    image: mongo-express
+    container_name: risk_mongo_express
+    depends_on:
+      - mongo
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_BASICAUTH: "false" # Tắt mật khẩu đăng nhập admin cho tiện dev
+    networks:
+      - risk-network
+
+networks:
+  risk-network:
+    driver: bridge
+    

@@ -1,0 +1,25 @@
+# --- Môi trường ảo & Cache Python ---
+backend/venv/
+backend/__pycache__/
+*.pyc
+
+# --- Thư viện Node.js (RẤT NẶNG) ---
+frontend/node_modules/
+
+# --- Dữ liệu Docker & Database ---
+data/mongo/
+data/kafka/
+
+# --- Các file tạm, file build ---
+frontend/build/
+temp_uploads/
+
+# --- File cấu hình môi trường (Chứa mật khẩu, không up) ---
+.env
+
+# --- IDE ---
+.vscode/
+.idea/
+
+# --- Model AI (Nếu bạn lỡ tải thủ công, còn code tự tải thì không cần dòng này) ---
+# backend/models/
