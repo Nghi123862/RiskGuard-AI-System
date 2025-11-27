@@ -14,6 +14,11 @@ import {
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer 
 } from 'recharts';
 import moment from 'moment';
+// --- THƯ VIỆN MỚI ---
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import Highlighter from "react-highlight-words";
+import { DownloadOutlined } from '@ant-design/icons';
 
 const { Header, Content, Footer, Sider } = Layout;
 const { Title, Text, Paragraph } = Typography;
@@ -97,6 +102,38 @@ const App = () => {
     setFileList([]);
     setTimeout(fetchData, 3000); // Tự động load lại sau 3s
   };
+  // --- TÍNH NĂNG MỚI: XUẤT PDF ---
+  const exportPDF = () => {
+    const doc = new jsPDF();
+    doc.text("BAO CAO RUI RO NOI DUNG (RISKGUARD AI)", 14, 20);
+    doc.setFontSize(10);
+    doc.text(`Ngay xuat: ${moment().format("DD/MM/YYYY HH:mm")}`, 14, 28);
+
+    const tableColumn = ["Loai", "Tieu de / Ten File", "Muc do", "Diem", "Thoi gian"];
+    const tableRows = [];
+
+    data.forEach(item => {
+      const type = item.url.startsWith('http') ? "WEB" : "FILE";
+      const title = (item.page_title || item.url).substring(0, 40); 
+      
+      const rowData = [
+        type,
+        title,
+        item.analysis?.label || "N/A",
+        item.analysis?.risk_score || 0,
+        moment(item.scanned_at).format("DD/MM HH:mm")
+      ];
+      tableRows.push(rowData);
+    });
+
+    autoTable(doc, {
+  head: [tableColumn],
+  body: tableRows,
+  startY: 35,
+});
+    doc.save("BaoCao_RiskGuard.pdf");
+    message.success("Đã tải báo cáo PDF!");
+  };
 
   // --- 3. CHUẨN BỊ DỮ LIỆU BIỂU ĐỒ ---
   const chartData = useMemo(() => {
@@ -155,7 +192,9 @@ const App = () => {
       render: (_, record) => (
         <Button size="small" icon={<EyeOutlined />} onClick={() => { setSelectedRecord(record); setDetailModalOpen(true); }}>
           Xem
+          
         </Button>
+        
       ),
     },
   ];
@@ -205,6 +244,7 @@ const App = () => {
         <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Title level={4} style={{margin: 0}}>Trung tâm Kiểm soát Rủi ro Nội dung</Title>
           <Space>
+            <Button icon={<DownloadOutlined />} onClick={exportPDF}>Xuất PDF</Button>
              <Button icon={<ReloadOutlined />} onClick={fetchData}>Làm mới</Button>
              <Button type="primary" size="large" icon={<ScanOutlined />} onClick={() => setIsModalOpen(true)}>QUÉT MỚI</Button>
           </Space>
@@ -286,7 +326,13 @@ const App = () => {
                 <div style={{marginTop: 20}}>
                    <Text strong>Trích xuất nội dung (500 ký tự đầu):</Text>
                    <div style={{marginTop: 5, padding: 15, background: '#f5f5f5', borderRadius: 5, maxHeight: 200, overflowY: 'auto', border: '1px solid #d9d9d9'}}>
-                      {selectedRecord.content_preview}
+                      <Highlighter
+    highlightClassName="YourHighlightClass"
+    searchWords={selectedRecord.analysis?.detected_keywords || []}
+    autoEscape={true}
+    textToHighlight={selectedRecord.content_preview || ""}
+    highlightStyle={{ backgroundColor: '#ffccc7', padding: '0 2px', borderRadius: 2, fontWeight: 'bold', color: 'red' }}
+/>
                    </div>
                 </div>
              </div>

@@ -1,21 +1,53 @@
-# File: backend/worker.py (Phiên bản Chuẩn - Hỗ trợ URL & FILE)
+# File: backend/worker.py (Phiên bản Chuẩn Bảo Mật)
 import json
+import requests
+import sys
+import os
 from datetime import datetime
+from kafka import KafkaConsumer 
+from dotenv import load_dotenv 
+
+# 1. Load biến môi trường từ file .env
+load_dotenv()
+
+# 2. Lấy cấu hình Telegram (An toàn)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 from config import KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_URL_SCAN
 from database import results_collection
 from services.crawler import crawl_website
 from services.ai_engine import predict_risk_phobert
 
-# --- LƯU Ý: Chọn thư viện Kafka phù hợp với máy bạn ---
-# Nếu bạn dùng kafka-python-ng (như đã sửa ở bước trước), hãy dùng dòng này:
-from kafka import KafkaConsumer 
+def send_telegram_alert(url, risk_score, label, keywords):
+    """Gửi cảnh báo về điện thoại"""
+    # Kiểm tra nếu chưa cấu hình Token thì bỏ qua
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: 
+        print("⚠️ Chưa cấu hình Telegram Token trong file .env")
+        return
+    
+    # Chỉ cảnh báo nếu Nguy hiểm hoặc Rủi ro cao
+    if label == "SAFE": return
 
-# Nếu bạn dùng confluent-kafka, hãy dùng dòng này (bỏ comment):
-# from confluent_kafka import Consumer
+    icon = "🚨" if label == "DANGEROUS" else "⚠️"
+    msg = f"""
+{icon} <b>CẢNH BÁO RỦI RO NỘI DUNG</b> {icon}
+-----------------------------
+🔗 <b>Nguồn:</b> {url}
+📊 <b>Mức độ:</b> {label} (Điểm: {risk_score}/100)
+🔍 <b>Từ khóa:</b> {', '.join(keywords)}
+🕒 <b>Thời gian:</b> {datetime.now().strftime('%H:%M %d/%m')}
+    """
+    try:
+        url_req = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url_req, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"})
+        print("📲 Đã gửi cảnh báo Telegram!")
+    except Exception as e:
+        print(f"Lỗi gửi Telegram: {e}")
 
-print(f"👷 Worker đang khởi động...")
+print(f"👷 Worker Siêu cấp đang khởi động...")
 
-# Cấu hình Consumer (Dùng kafka-python-ng cho ổn định trên Windows)
+# Kết nối Kafka
 try:
     consumer = KafkaConsumer(
         KAFKA_TOPIC_URL_SCAN,
@@ -24,74 +56,56 @@ try:
         auto_offset_reset='earliest',
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
-    print(f"✅ Đã kết nối Kafka! Đang lắng nghe topic '{KAFKA_TOPIC_URL_SCAN}'")
+    print(f"✅ Đã kết nối Kafka! Sẵn sàng chiến đấu.")
 except Exception as e:
-    print(f"❌ Lỗi kết nối Kafka: {e}")
-    exit(1)
+    print(f"❌ Lỗi Kafka: {e}")
+    sys.exit(1)
 
-try:
-    # Vòng lặp Consumer của kafka-python-ng hơi khác confluent một chút
-    for msg in consumer:
-        # Lấy dữ liệu đã được giải mã tự động
-        data = msg.value
+# Vòng lặp chính
+for msg in consumer:
+    data = msg.value
+    request_id = data.get('request_id')
+    scan_type = data.get('type', 'URL')
+    target = data.get('target')
+    
+    print(f"\n⚡ Xử lý: {target} [{scan_type}]")
+    content = ""
+    title = target
+
+    # 1. LẤY NỘI DUNG
+    if scan_type == 'URL':
+        print("   ---> Crawling Web...")
+        fetched_title, fetched_content = crawl_website(target)
+        if not fetched_title:
+            print(f"   ❌ Lỗi crawl: {fetched_content}")
+            results_collection.insert_one({"request_id": request_id, "url": target, "status": "FAILED", "error": fetched_content, "scanned_at": datetime.utcnow()})
+            continue
+        title = fetched_title
+        content = fetched_content
         
-        request_id = data.get('request_id')
-        scan_type = data.get('type', 'URL') 
-        target = data.get('target')         
-        
-        print(f"\n⚡ Đang xử lý: {target} (Loại: {scan_type})")
+    elif scan_type == 'FILE':
+        print("   ---> Reading File...")
+        content = data.get('content', "")
+        title = f"FILE: {target}"
 
-        content = ""
-        title = target
+    # 2. PHÂN TÍCH AI
+    if content:
+        print(f"   🧠 Running Hybrid AI...")
+        analysis = predict_risk_phobert(content)
 
-        # --- LOGIC RẼ NHÁNH ---
-        if scan_type == 'URL':
-            # Nếu là URL -> Phải đi Crawl
-            print("   ---> Đang tải trang web...")
-            fetched_title, fetched_content = crawl_website(target)
-            
-            if not fetched_title: # Crawl lỗi
-                print(f"   ❌ Lỗi crawl: {fetched_content}")
-                # Lưu lỗi vào DB để Frontend biết
-                results_collection.insert_one({
-                    "request_id": request_id,
-                    "url": target,
-                    "status": "FAILED",
-                    "error": fetched_content,
-                    "scanned_at": datetime.utcnow()
-                })
-                continue
+        # 3. GỬI CẢNH BÁO TELEGRAM
+        if analysis['label'] in ['DANGEROUS', 'WARNING']:
+            send_telegram_alert(target, analysis['risk_score'], analysis['label'], analysis['detected_keywords'])
 
-            title = fetched_title
-            content = fetched_content
-            
-        elif scan_type == 'FILE':
-            # Nếu là FILE -> Nội dung đã được Backend gửi kèm
-            print("   ---> Đang đọc nội dung file từ tin nhắn...")
-            content = data.get('content', "")
-            title = f"FILE: {target}"
-
-        # --- CHẠY AI (Phần chung) ---
-        if content:
-            print(f"   🧠 Đang chạy AI Hybrid phân tích...")
-            analysis = predict_risk_phobert(content)
-
-            # Đóng gói kết quả
-            result_doc = {
-                "request_id": request_id,
-                "url": target,
-                "page_title": title,
-                "content_preview": content[:500], # Lưu 500 ký tự đầu
-                "analysis": analysis,
-                "status": "COMPLETED",
-                "scanned_at": datetime.utcnow()
-            }
-            
-            # Lưu vào MongoDB
-            results_collection.insert_one(result_doc)
-            print(f"✅ Đã lưu kết quả! [Label: {analysis['label']}]")
-
-except KeyboardInterrupt:
-    print("🛑 Đang dừng Worker...")
-finally:
-    consumer.close()
+        # 4. LƯU DB
+        result_doc = {
+            "request_id": request_id,
+            "url": target,
+            "page_title": title,
+            "content_preview": content[:500],
+            "analysis": analysis,
+            "status": "COMPLETED",
+            "scanned_at": datetime.utcnow()
+        }
+        results_collection.insert_one(result_doc)
+        print(f"✅ Xong! Label: {analysis['label']}")

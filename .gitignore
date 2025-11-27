@@ -23,3 +23,5 @@ temp_uploads/
 
 # --- Model AI (Nếu bạn lỡ tải thủ công, còn code tự tải thì không cần dòng này) ---
 # backend/models/
+.env
+backend/.env

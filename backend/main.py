@@ -2,6 +2,7 @@
 import uuid
 import shutil
 import os
+import pytesseract
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +10,8 @@ from pydantic import BaseModel
 from config import API_TITLE, API_VERSION, KAFKA_TOPIC_URL_SCAN
 from kafka_producer import kafka_service
 from database import results_collection
+from PIL import Image
+
 
 # Thư viện đọc file mới cài
 from pypdf import PdfReader
@@ -32,17 +35,22 @@ class URLScanRequest(BaseModel):
 def extract_text_from_file(file_path: str, filename: str):
     text = ""
     try:
-        if filename.endswith(".pdf"):
+        lower_name = filename.lower()
+        if lower_name.endswith(".pdf"):
             reader = PdfReader(file_path)
-            for page in reader.pages:
-                text += page.extract_text() + "\n"
-        elif filename.endswith(".docx"):
+            for page in reader.pages: text += page.extract_text() + "\n"
+        elif lower_name.endswith(".docx"):
             doc = Document(file_path)
-            for para in doc.paragraphs:
-                text += para.text + "\n"
-        else: # File .txt
-            with open(file_path, "r", encoding="utf-8") as f:
-                text = f.read()
+            for para in doc.paragraphs: text += para.text + "\n"
+        
+        # --- THÊM PHẦN NÀY: XỬ LÝ ẢNH ---
+        elif lower_name.endswith((".png", ".jpg", ".jpeg")):
+            image = Image.open(file_path)
+            text = pytesseract.image_to_string(image, lang='vie') # lang='vie' để đọc tiếng Việt
+        # --------------------------------
+        
+        else: # .txt
+            with open(file_path, "r", encoding="utf-8") as f: text = f.read()
     except Exception as e:
         print(f"Lỗi đọc file: {e}")
         return None
@@ -107,3 +115,4 @@ async def upload_file_scan(file: UploadFile = File(...)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    
